@@ -1,0 +1,11 @@
+import de.hybris.platform.cronjob.model.CronJobModel
+flexibleSearchService.search("SELECT {${CronJobModel.PK}} FROM {${CronJobModel._TYPECODE}}")
+.result
+.findAll {it.itemtype.toString() != "CatalogVersionSyncCronJob"}
+.each {
+  def cronExpressions = it.triggers*.cronExpression.findAll {it != null}
+  if (cronExpressions.isEmpty()) {
+    cronExpressions = ""
+  }
+  println("${it.code}|${it.job.code}|${cronExpressions}|${it.result}|${it.timeTable.replaceAll("(\\r|\\n|\\r\\n)+", " ")}|${it.endTime ?: "<empty>"}")
+}
