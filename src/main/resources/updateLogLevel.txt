@@ -1,0 +1,2 @@
+clusterLoggingService.changeLogLevel("de.hybris.platform.servicelayer","DEBUG")
+clusterLoggingService.changeLogLevel("net.netconomy.dglcore.media","DEBUG")
