@@ -1,5 +1,7 @@
 package de.mobe.hacman;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.LoggerContext;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -20,6 +22,7 @@ import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
 import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactoryBuilder;
 import org.apache.hc.client5.http.ssl.TrustAllStrategy;
+import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.NameValuePair;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
@@ -49,6 +52,10 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static de.mobe.hacman.Main.ERR;
+import static de.mobe.hacman.Main.HAC_MAN_ERROR;
+import static de.mobe.hacman.Main.OK;
+
 public class HacMan {
 
     private static final Logger LOG = LoggerFactory.getLogger(HacMan.class);
@@ -66,9 +73,10 @@ public class HacMan {
     private static final long CANCEL_HAC_MAN_AFTER_MS = 60L * 1000 * 100;
     private static final Map<HttpUriRequestBase, Long> REQUEST_MONITOR = new ConcurrentHashMap<>();
     private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
-    private static final int OK = 0;
-    private static final int ERROR = 1;
-
+    private static final String HELP_TXT =
+        "- Example: \n java -jar ./target/hacman.jar ./target/classes/groovyRocks.txt "
+            + "-c https://localhost:9002 -u admin -p nimda"
+            + ". Use 'echo $?' to grep the system exit code: 0 = OK, 1 = Error\n";
     public static final String VOID_SCRIPT_RESULT = "void";
 
     static {
@@ -84,10 +92,16 @@ public class HacMan {
     @Parameter(names = {"--commerce", "-c"}, order = 2, description = "<SAP commerce URL>, default https://127.0.0.1:9002")
     private String server;
 
-    @Parameter(required = true, description = "<Groovy-Script Location>, ex. /home/lucy/SomeGroovyHacCommands.txt")
+    @Parameter(names = {"--commit", "-t"}, order = 3, description = "Enable HAC commit mode")
+    private boolean commit = false;
+
+    @Parameter(required = true, description = "<Groovy-Script Location>\n" + HELP_TXT)
     private String scriptLocation;
 
-    @Parameter(names = "--help", order = 99, help = true, description = "This help message")
+    @Parameter(names = {"--debug", "-d"}, order = 98, description = "Enable debug level, see hacman.log")
+    private Boolean debug = false;
+
+    @Parameter(names = {"--help", "-h"}, order = 99, help = true, description = "This help")
     private boolean help;
 
     /**
@@ -100,8 +114,10 @@ public class HacMan {
         Optional<String> scriptContent = readScriptFile(getScriptLocation());
 
         if (scriptContent.isEmpty()) {
-            LOG.error("Provided script file {} is empty.", getScriptLocation());
-            return Optional.empty();
+            String msg = MessageFormat.format(HAC_MAN_ERROR + " reading script file {0}. See log file.",
+                                              getScriptLocation());
+            LOG.error(msg);
+            return Optional.of(msg);
         }
 
         return runImpl(getLoginPageUrl(),
@@ -115,9 +131,9 @@ public class HacMan {
     /**
      * Run tings:
      *
-     * 1) go to login page => csrf token
-     * 2) login => new csrf token
-     * 3) execute script on the provided HAC endpoint => script output
+     * 1) visit Hac login page => grep csrf token
+     * 2) post login creds => grep new csrf token
+     * 3) send script into the Hac console => grep script output
      */
     private Optional<String> runImpl(final String loginPageUrl,
                                      final String postFormUrl,
@@ -126,51 +142,56 @@ public class HacMan {
                                      final String password,
                                      final String script) {
 
-        try (CloseableHttpClient httpclient = createAcceptSelfSignedCertificateClient()) {
+        try (CloseableHttpClient httpClient = createAcceptSelfSignedCertificateClient()) {
 
-            // session cookie storage
+            // setup session cookie storage
             HttpClientContext httpContext = HttpClientContext.create();
             httpContext.setAttribute(HttpClientContext.COOKIE_STORE, new BasicCookieStore());
 
-            // fetch initial csrf token
-            Optional<String> initialToken = openLoginPageAndGetToken(loginPageUrl, httpclient, httpContext);
+            // grep initial csrf token
+            Optional<String> initialToken = openLoginPageAndGrepToken(loginPageUrl, httpClient, httpContext);
 
             if (initialToken.isEmpty()) {
                 LOG.error("Couldn't obtain csrf token from {}", loginPageUrl);
                 return Optional.empty();
             }
 
-            // login and fetch final csrf token
-            Optional<String> loginToken = loginAndPostCredentials(postFormUrl,
-                                                                  username,
-                                                                  password,
-                                                                  httpclient,
-                                                                  httpContext,
-                                                                  initialToken.get());
+            // login and grep final csrf token
+            Optional<String> loginToken = loginWithCredentials(postFormUrl,
+                                                               username,
+                                                               password,
+                                                               httpClient,
+                                                               httpContext,
+                                                               initialToken.get());
 
             if (loginToken.isEmpty()) {
                 LOG.error("Couldn't obtain a login csrf token from {}", postFormUrl);
                 return Optional.empty();
             }
 
-            // execute script content on remote server
+            if (initialToken.get().equals(loginToken.get())) {
+                LOG.warn("Login csrf token == initial token {}", initialToken);
+            }
+
+            // run script content on remote server
             return executeScript(scriptingConsoleUrl,
                                  loginToken.get(),
                                  httpContext,
-                                 httpclient,
+                                 httpClient,
                                  script);
 
         } catch (IOException | ParseException | NoSuchAlgorithmException | KeyStoreException | KeyManagementException e) {
-            LOG.error("Error executing script: {}", getScriptLocation(), e);
-            System.exit(ERROR);
-        }
+            String msg = MessageFormat.format(HAC_MAN_ERROR + " executing script: {}",
+                                              getScriptLocation());
 
-        return Optional.empty();
+            LOG.error(msg, getScriptLocation(), e);
+            return Optional.of(msg);
+        }
     }
 
-    private Optional<String> openLoginPageAndGetToken(final String loginPageUrl,
-                                                      final CloseableHttpClient httpClient,
-                                                      final HttpClientContext httpContext)
+    private Optional<String> openLoginPageAndGrepToken(final String loginPageUrl,
+                                                       final CloseableHttpClient httpClient,
+                                                       final HttpClientContext httpContext)
         throws IOException, ParseException {
 
         HttpGet httpget = null;
@@ -201,30 +222,35 @@ public class HacMan {
 
             final List<Cookie> cookies = httpContext.getCookieStore().getCookies();
 
-            LOG.debug("Cookie: {} | CSRF: {}",
-                      formatCookie(cookies), // NOSONAR
-                      getCsrfToken(metaTag));
+            LOG.debug("Cookie: {}",
+                      formatCookies(cookies)); // NOSONAR
+            LOG.debug("CSRF: {}",
+                      grepCsrfToken(metaTag).orElse("void")); // NOSONAR
 
-            return getCsrfToken(metaTag);
+            return grepCsrfToken(metaTag);
 
         } finally {
             removeFromRequestMonitor(httpget);
         }
     }
 
-    private Optional<String> loginAndPostCredentials(final String postLoginFormUrl,
-                                                     final String username,
-                                                     final String password,
-                                                     final CloseableHttpClient httpClient,
-                                                     final HttpClientContext httpContext,
-                                                     final String csrfToken)
+    private Optional<String> loginWithCredentials(final String postLoginFormUrl,
+                                                  final String username,
+                                                  final String password,
+                                                  final CloseableHttpClient httpClient,
+                                                  final HttpClientContext httpContext,
+                                                  final String csrfToken)
         throws IOException, ParseException {
-        List<NameValuePair> urlParameters;
 
         HttpPost post = null;
 
         try {
+
             final List<Cookie> cookies = httpContext.getCookieStore().getCookies();
+
+            for (Cookie cookie : cookies) {
+                LOG.debug("Cookie {}: {}", cookie.getName(), cookie.getValue());
+            }
 
             post = new HttpPost(postLoginFormUrl);
 
@@ -246,21 +272,33 @@ public class HacMan {
             post.setHeader("Origin", getCommerceBaseUrl());
             post.setHeader("DNT", "1");
             post.setHeader("Connection", "keep-alive");
-            post.setHeader("Referer", getLoginPageUrl());
-            post.setHeader("Cookie", formatCookie(cookies));
+            post.setHeader("Referer", getCommerceBaseUrl() + "/backoffice/login.zul");
+            post.setHeader("Cookie", formatCookies(cookies));
             post.setHeader("Upgrade-Insecure-Requests", "1");
             post.setHeader("Sec-Fetch-Dest", "document");
             post.setHeader("Sec-Fetch-Mode", "navigate");
             post.setHeader("Sec-Fetch-Site", "same-origin");
             post.setHeader("Sec-Fetch-User", "?1");
 
+            LOG.debug("loginWithCredentials headers");
+            for (Header header : post.getHeaders()) {
+                LOG.debug("{}: {}", header.getName(), header.getValue());
+            }
+
             // add request parameters or form parameters
+            List<NameValuePair> urlParameters;
             urlParameters = new ArrayList<>();
             urlParameters.add(new BasicNameValuePair("j_username", username));
             urlParameters.add(new BasicNameValuePair("j_password", password));
             urlParameters.add(new BasicNameValuePair("_csrf", csrfToken));
 
+            for (NameValuePair urlParameter : urlParameters) {
+                LOG.debug("{}: {}", urlParameter.getName(), urlParameter.getValue());
+            }
+
             post.setEntity(new UrlEncodedFormEntity(urlParameters));
+
+            LOG.debug("post.getEntity().toString() = " + post.getEntity()); // NOSONAR
 
             CloseableHttpResponse response = httpClient.execute(post, httpContext);
 
@@ -273,11 +311,12 @@ public class HacMan {
             Document doc = Jsoup.parse(body);
             Elements metaTag = doc.select(META_NAME_CSRF);
 
-            LOG.debug("Cookie: {} | CSRF: {}",
-                      formatCookie(cookies), // NOSONAR
-                      getCsrfToken(metaTag));
+            LOG.debug("Cookie: {}",
+                      formatCookies(cookies)); // NOSONAR
+            LOG.debug("CSRF: {}",
+                      grepCsrfToken(metaTag).orElse("void")); // NOSONAR
 
-            return getCsrfToken(metaTag);
+            return grepCsrfToken(metaTag);
 
         } finally {
             removeFromRequestMonitor(post);
@@ -287,7 +326,7 @@ public class HacMan {
     private Optional<String> executeScript(final String scriptingConsoleUrl,
                                            final String csrfToken,
                                            final HttpClientContext httpContext,
-                                           final CloseableHttpClient httpclient,
+                                           final CloseableHttpClient httpClient,
                                            final String script)
         throws IOException, ParseException {
 
@@ -322,23 +361,23 @@ public class HacMan {
             post.setHeader("Sec-Fetch-Dest", "empty");
             post.setHeader("Sec-Fetch-Mode", "cors");
             post.setHeader("Sec-Fetch-Site", "same-origin");
-            post.setHeader("Cookie", formatCookie(cookies));
+            post.setHeader("Cookie", formatCookies(cookies));
 
             List<NameValuePair> urlParameters;
 
             urlParameters = new ArrayList<>();
             urlParameters.add(new BasicNameValuePair("scriptType", "groovy"));
-            urlParameters.add(new BasicNameValuePair("commit", "false"));
+            urlParameters.add(new BasicNameValuePair("commit", String.valueOf(isCommitEnabled())));
             urlParameters.add(new BasicNameValuePair("script", script));
             post.setEntity(new UrlEncodedFormEntity(urlParameters));
 
-            CloseableHttpResponse response = httpclient.execute(post, httpContext);
+            CloseableHttpResponse response = httpClient.execute(post, httpContext);
 
             LOG.info("Got http status {} from: {}", response.getCode(), scriptingConsoleUrl);
 
             final String body = EntityUtils.toString(response.getEntity());
 
-            LOG.debug("EXE body: {}", body); // NOSONAR
+            LOG.debug("Script execution result body: {}", body); // NOSONAR
 
             final String result = StringUtils.substringBetween(body,
                                                                "\"executionResult\":\"",
@@ -358,6 +397,7 @@ public class HacMan {
         throws NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
         return
             HttpClients.custom()
+
                        .setConnectionManager(
                            PoolingHttpClientConnectionManagerBuilder
                                .create()
@@ -374,36 +414,6 @@ public class HacMan {
                                        .build())
                                .build())
                        .build();
-    }
-
-    /**
-     * @see "https://jcommander.org/#_overview"
-     */
-    private void initCmdLineArgs(final String... arguments) {
-
-        try {
-            final JCommander jCommander =
-                JCommander.newBuilder()
-                          .addObject(this)
-                          .build();
-
-            jCommander.setProgramName("java -jar hacman.jar");
-
-            jCommander.parse(arguments);
-
-            if (getHelp()) {
-                jCommander.usage();
-                System.exit(OK);
-            }
-
-            LOG.debug("User: {}", getUsername());
-            LOG.debug("Password: {}", getPassword());
-            LOG.debug("Commerce: {}", getCommerceBaseUrl());
-            LOG.debug("Script: {}", getScriptLocation());
-        } catch (ParameterException e) {
-            LOG.error("Missing or invalid program argument:", e);
-            System.exit(ERROR);
-        }
     }
 
     private Optional<String> readScriptFile(final String scriptLocation) {
@@ -435,14 +445,18 @@ public class HacMan {
         // cancel requests
         expiredRequests.forEach(r -> {
             if (!r.isCancelled()) {
-                LOG.error("Cancelled request {} after {} ms", r.getRequestUri(), CANCEL_HAC_MAN_AFTER_MS);
                 r.cancel();
+                String msg = MessageFormat.format("Cancelled request {} after {} ms",
+                                                  r.getRequestUri(),
+                                                  CANCEL_HAC_MAN_AFTER_MS);
+                LOG.error(msg);
+                System.out.println("msg = " + msg); // NOSONAR
             }
             REQUEST_MONITOR.remove(r);
         });
 
         if (!expiredRequests.isEmpty()) {
-            System.exit(ERROR);
+            System.exit(ERR);
         }
     }
 
@@ -454,7 +468,7 @@ public class HacMan {
         REQUEST_MONITOR.remove(request);
     }
 
-    private Optional<String> getCsrfToken(final Elements metaTag) {
+    private Optional<String> grepCsrfToken(final Elements metaTag) {
         return metaTag.first() != null ?
                Optional.ofNullable(StringUtils.trimToNull(metaTag.first().attr(META_CONTENT))) :
                Optional.empty();
@@ -488,15 +502,67 @@ public class HacMan {
         return StringUtils.defaultString(scriptLocation, "");
     }
 
-    private boolean getHelp() {
-        return this.help;
+    private boolean isDebugEnabled() {
+        return debug;
     }
 
-    private String formatCookie(final List<Cookie> cookies) {
+    private boolean getHelp() {
+        return help;
+    }
+    private boolean isCommitEnabled() {
+        return this.commit;
+    }
+
+    private String formatCookies(final List<Cookie> cookies) {
         return cookies.stream().map(this::formatCookie).collect(Collectors.joining("; "));
     }
 
     private String formatCookie(Cookie cookie) {
         return MessageFormat.format("{0}={1}", cookie.getName(), cookie.getValue());
+    }
+
+    private void setDebugLogLevel() {
+        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        ch.qos.logback.classic.Logger logger = loggerContext.getLogger(HacMan.class);
+        logger.setLevel(Level.toLevel("DEBUG"));
+    }
+
+    /**
+     * @see "<a href="https://jcommander.org/#_overview">https://jcommander.org/#_overview</a>"
+     */
+    private void initCmdLineArgs(final String... arguments) {
+
+        try {
+            final JCommander jCommander =
+                JCommander.newBuilder()
+                          .addObject(this)
+                          .build();
+
+            jCommander.setProgramName("java -jar hacman.jar");
+
+            jCommander.parse(arguments);
+
+            if (getHelp()) {
+                jCommander.usage();
+                System.exit(OK);
+            }
+
+            if (isDebugEnabled()) {
+                setDebugLogLevel();
+            }
+
+            LOG.debug("User: {}", getUsername());
+            LOG.debug("Password: {}", getPassword());
+            LOG.debug("Commerce: {}", getCommerceBaseUrl());
+            LOG.debug("Script: {}", getScriptLocation());
+            LOG.debug("Debug enabled: {}", isDebugEnabled());
+            LOG.debug("Commit enabled: {}", isCommitEnabled());
+
+        } catch (ParameterException e) {
+            String msg = MessageFormat.format("Missing or invalid program argument: {0}", e);
+            LOG.error(msg);
+            System.out.println("msg = " + msg); // NOSONAR
+            System.exit(ERR);
+        }
     }
 }
