@@ -5,16 +5,25 @@ import java.util.Optional;
 
 public class Main {
 
-    private static final int OK = 0;
+    public static final int OK = 0;
+    public static final int ERR = 1;
+    public static final String HAC_MAN_ERROR = "HacMan: Error";
 
     public static void main(String... args) {
         HacMan hacman = new HacMan();
         Optional<String> result = hacman.run(args);
 
-        String msg = MessageFormat.format("<script-result>{0}</script-result>",
-                                          result.orElse(HacMan.VOID_SCRIPT_RESULT));
+        String hacManResult =
+            MessageFormat.format("<hac>{0}{1}{2}</hac>",
+                                 System.lineSeparator(),
+                                 result.orElse("HacMan Error. See log file."),
+                                 System.lineSeparator());
 
-        System.out.println(msg);// NOSONAR
+        System.out.println(hacManResult);// NOSONAR
+
+        if (hacManResult.contains(HAC_MAN_ERROR)) {
+            System.exit(ERR);
+        }
 
         System.exit(OK);
     }
