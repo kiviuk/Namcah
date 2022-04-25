@@ -1,5 +1,2 @@
 def cronJob1 = cronJobDao.findCronJobs("miraklDownloadProductFilesCronJob")
 cronJobService.performCronJob(cronJob1)
-
-def cronJob2 = cronJobDao.findCronJobs("miraklProductImportCronJob")
-cronJobService.performCronJob(cronJob2)

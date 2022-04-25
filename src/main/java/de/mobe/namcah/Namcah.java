@@ -1,4 +1,4 @@
-package de.mobe.hacman;
+package de.mobe.namcah;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
@@ -52,14 +52,12 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static de.mobe.hacman.Main.ERR;
-import static de.mobe.hacman.Main.HAC_MAN_ERROR;
-import static de.mobe.hacman.Main.OK;
+import static de.mobe.namcah.Main.ERR;
+import static de.mobe.namcah.Main.HAC_MAN_ERROR;
+import static de.mobe.namcah.Main.OK;
 
-public class HacMan {
-
-    private static final Logger LOG = LoggerFactory.getLogger(HacMan.class);
-
+public class Namcah {
+    private static final Logger LOG = LoggerFactory.getLogger(Namcah.class);
     private static final String META_CONTENT = "content";
     private static final String META_NAME_CSRF = "meta[name='_csrf']";
     private static final String HAC_LOGIN = "hac/login";
@@ -74,13 +72,13 @@ public class HacMan {
     private static final Map<HttpUriRequestBase, Long> REQUEST_MONITOR = new ConcurrentHashMap<>();
     private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
     private static final String HELP_TXT =
-        "- Example: \n java -jar ./target/hacman.jar ./target/classes/groovyRocks.txt "
+        "- Example: \n java -jar ./target/namcah.jar ./target/classes/groovyRocks.txt "
             + "-c https://localhost:9002 -u admin -p nimda"
             + ". Use 'echo $?' to grep the system exit code: 0 = OK, 1 = Error\n";
     public static final String VOID_SCRIPT_RESULT = "void";
 
     static {
-        SCHEDULER.schedule(HacMan::cleanupExpiredRequests, CANCEL_HAC_MAN_AFTER_MS, TimeUnit.MILLISECONDS);
+        SCHEDULER.schedule(Namcah::cleanupExpiredRequests, CANCEL_HAC_MAN_AFTER_MS, TimeUnit.MILLISECONDS);
     }
 
     @Parameter(names = {"--username", "-u"}, order = 0, description = "<Hac username>, default 'admin'")
@@ -98,16 +96,16 @@ public class HacMan {
     @Parameter(required = true, description = "<Groovy-Script Location>\n" + HELP_TXT)
     private String scriptLocation;
 
-    @Parameter(names = {"--debug", "-d"}, order = 98, description = "Enable debug level, see hacman.log")
+    @Parameter(names = {"--debug", "-d"}, order = 98, description = "Enable debug level, see namcah.log")
     private Boolean debug = false;
 
     @Parameter(names = {"--help", "-h"}, order = 99, help = true, description = "This help")
     private boolean help;
 
     /**
-     * Run the Hacman.
+     * Go Hacman, go!
      */
-    public Optional<String> run(final String... arguments) {
+    public Optional<String> runHac(final String... arguments) {
 
         initCmdLineArgs(arguments);
 
@@ -120,27 +118,25 @@ public class HacMan {
             return Optional.of(msg);
         }
 
-        return runImpl(getLoginPageUrl(),
-                       getPostLoginFormUrl(),
-                       getScriptingConsoleUrl(),
-                       getUsername(),
-                       getPassword(),
-                       scriptContent.get());
+        return runHacImpl(getLoginPageUrl(),
+                          getPostLoginFormUrl(),
+                          getScriptingConsoleUrl(),
+                          getUsername(),
+                          getPassword(),
+                          scriptContent.get());
     }
 
     /**
-     * Run tings:
-     *
      * 1) visit Hac login page => grep csrf token
      * 2) post login creds => grep new csrf token
-     * 3) send script into the Hac console => grep script output
+     * 3) send script into Hac console => grep script output
      */
-    private Optional<String> runImpl(final String loginPageUrl,
-                                     final String postFormUrl,
-                                     final String scriptingConsoleUrl,
-                                     final String username,
-                                     final String password,
-                                     final String script) {
+    private Optional<String> runHacImpl(final String loginPageUrl,
+                                        final String postFormUrl,
+                                        final String scriptingConsoleUrl,
+                                        final String username,
+                                        final String password,
+                                        final String script) {
 
         try (CloseableHttpClient httpClient = createAcceptSelfSignedCertificateClient()) {
 
@@ -173,7 +169,7 @@ public class HacMan {
                 LOG.warn("Login csrf token == initial token {}", initialToken);
             }
 
-            // run script content on remote server
+            // exec script content on remote server
             return executeScript(scriptingConsoleUrl,
                                  loginToken.get(),
                                  httpContext,
@@ -183,7 +179,6 @@ public class HacMan {
         } catch (IOException | ParseException | NoSuchAlgorithmException | KeyStoreException | KeyManagementException e) {
             String msg = MessageFormat.format(HAC_MAN_ERROR + " executing script: {}",
                                               getScriptLocation());
-
             LOG.error(msg, getScriptLocation(), e);
             return Optional.of(msg);
         }
@@ -397,7 +392,6 @@ public class HacMan {
         throws NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
         return
             HttpClients.custom()
-
                        .setConnectionManager(
                            PoolingHttpClientConnectionManagerBuilder
                                .create()
@@ -509,6 +503,7 @@ public class HacMan {
     private boolean getHelp() {
         return help;
     }
+
     private boolean isCommitEnabled() {
         return this.commit;
     }
@@ -517,13 +512,13 @@ public class HacMan {
         return cookies.stream().map(this::formatCookie).collect(Collectors.joining("; "));
     }
 
-    private String formatCookie(Cookie cookie) {
+    private String formatCookie(final Cookie cookie) {
         return MessageFormat.format("{0}={1}", cookie.getName(), cookie.getValue());
     }
 
     private void setDebugLogLevel() {
         LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
-        ch.qos.logback.classic.Logger logger = loggerContext.getLogger(HacMan.class);
+        ch.qos.logback.classic.Logger logger = loggerContext.getLogger(Namcah.class);
         logger.setLevel(Level.toLevel("DEBUG"));
     }
 
@@ -538,7 +533,7 @@ public class HacMan {
                           .addObject(this)
                           .build();
 
-            jCommander.setProgramName("java -jar hacman.jar");
+            jCommander.setProgramName("java -jar namcah.jar");
 
             jCommander.parse(arguments);
 

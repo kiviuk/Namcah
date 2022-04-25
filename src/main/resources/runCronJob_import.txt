@@ -1,0 +1,2 @@
+def cronJob2 = cronJobDao.findCronJobs("miraklProductImportCronJob")
+cronJobService.performCronJob(cronJob2)

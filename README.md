@@ -1,8 +1,8 @@
-# Hacman
+# Namcah
 
-Hacman is a simple Java http client for the HAC Scripting Console of SAP Commerce.
+Namcah is a simple Java http client for the HAC Scripting Console of SAP Commerce.
 
-Use Hacman from the command line to send a groovy script file to a remote HAC scripting console 
+Use Namcah from the command line to send a groovy script file to a remote HAC scripting console 
 and to execute it right there.
 
 Based on https://hc.apache.org/httpcomponents-client-5.1.x
@@ -19,22 +19,22 @@ Tested on Java 11
 
 ```sh
 # Clone the project
-git clone git@github.com:kiviuk/Hacman.git
+git clone git@github.com:kiviuk/Namcah.git
 
-# Build & install hacman.jar to ./target 
-cd Hacman
+# Build & install namcah.jar to ./target 
+cd Namcah
 mvn install package
 ```
 
 ## Running
 
 ```sh
-hacman --help
+namcah --help
 
-Usage: java -jar hacman.jar [options] <Groovy-Script Location>
+Usage: java -jar namcah.jar [options] <Groovy-Script Location>
 - Example: 
  
-      java -jar ./target/hacman.jar ./target/classes/groovyRocks.txt -c 
+      java -jar ./target/namcah.jar ./target/classes/groovyRocks.txt -c 
       https://localhost:9002 -u admin -p nimda. Use 'echo $?' to grep the 
       system exit code: 0 = Ok, 1 = Error
 
@@ -49,7 +49,7 @@ Usage: java -jar hacman.jar [options] <Groovy-Script Location>
       Enable HAC commit mode
       Default: false
     --debug, -d
-      Enable debug level, see hacman.log
+      Enable debug level, see namcah.log
       Default: false
     --help, -h
       This help
@@ -60,28 +60,28 @@ Examples:
 ```
 # Run cronjobs on https://127.0.0.1:9002/hac
 # using the default host, username and password.
-java -jar ./target/hacman.jar ./target/classes/runCronJob.txt
+java -jar ./target/namcah.jar ./target/classes/runCronJob-dl.txt
 
 # Output
-<hacman>
+<namcah>
 void
-</hacman>
+</namcah>
 
 # Update log levels for https://127.0.0.1:9002/hac
-java -jar ./target/hacman.jar ./target/classes/updateLogLevel.txt
+java -jar ./target/namcah.jar ./target/classes/updateLogLevel.txt
 
 # Output
-<hacman>
+<namcah>
 void
-</hacman>
+</namcah>
 
 # Run the obligatory Groovy Rocks! on https://127.0.0.1:9002/hac
-java -jar ./target/hacman.jar ./target/classes/groovyRocks.txt -c https://localhost:9002 -u someUser -p somePassword
+java -jar ./target/namcah.jar ./target/classes/groovyRocks.txt -c https://localhost:9002 -u someUser -p somePassword
 
 # Output
-<hacman>
+<namcah>
 Groovy Rocks!
-</hacman>
+</namcah>
 
 ```
 Example scripts:

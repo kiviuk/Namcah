@@ -8,7 +8,7 @@
   <artifactId>hm</artifactId>
   <version>1.0</version>
 
-  <name>Hacman</name>
+  <name>Namcah</name>
   <url>http://www.example.com</url>
 
   <properties>
@@ -89,7 +89,7 @@
               <manifest>
                 <addClasspath>true</addClasspath>
                 <classpathPrefix>lib/</classpathPrefix>
-                <mainClass>de.mobe.hacman.Main</mainClass>
+                <mainClass>de.mobe.namcah.Main</mainClass>
               </manifest>
             </archive>
           </configuration>
@@ -127,7 +127,7 @@
         <artifactId>maven-assembly-plugin</artifactId>
         <version>3.3.0</version>
         <configuration>
-          <finalName>hacman</finalName>
+          <finalName>namcah</finalName>
           <descriptorRefs>
             <descriptorRef>jar-with-dependencies</descriptorRef>
           </descriptorRefs>
@@ -136,7 +136,7 @@
             <manifest>
               <addClasspath>true</addClasspath>
               <classpathPrefix>lib/</classpathPrefix>
-              <mainClass>de.mobe.hacman.Main</mainClass>
+              <mainClass>de.mobe.namcah.Main</mainClass>
             </manifest>
           </archive>
         </configuration>
