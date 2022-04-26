@@ -32,11 +32,11 @@ mvn install package
 namcah --help
 
 Usage: java -jar namcah.jar [options] <Groovy-Script Location>
-- Example: 
- 
-      java -jar ./target/namcah.jar ./target/classes/groovyRocks.txt -c 
-      https://localhost:9002 -u admin -p nimda. Use 'echo $?' to grep the 
-      system exit code: 0 = Ok, 1 = Error
+- Example:
+
+      java -jar ./target/namcah.jar ./target/classes/groovyRocks.txt -c
+      https://localhost:9002 -u admin -p nimda. Use 'echo $?' to grep the
+      system exit code: 0 = OK, 1 = Error
 
   Options:
     --username, -u
@@ -46,16 +46,19 @@ Usage: java -jar namcah.jar [options] <Groovy-Script Location>
     --commerce, -c
       <SAP commerce URL>, default https://127.0.0.1:9002
     --commit, -t
-      Enable HAC commit mode
+      Control hAC commit mode
       Default: false
+    --route, -r
+      The node route in case of a background processing node
     --debug, -d
-      Enable debug level, see namcah.log
+      Enable debug level, (logs are kept in namcah.log)
       Default: false
     --help, -h
       This help
-
-
+      
+      
 ```
+
 Examples: 
 ```
 # Run cronjobs on https://127.0.0.1:9002/hac

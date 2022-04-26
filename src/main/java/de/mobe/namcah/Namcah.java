@@ -17,6 +17,7 @@ import org.apache.hc.client5.http.entity.UrlEncodedFormEntity;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.cookie.BasicClientCookie;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
@@ -57,6 +58,7 @@ import static de.mobe.namcah.Main.HAC_MAN_ERROR;
 import static de.mobe.namcah.Main.OK;
 
 public class Namcah {
+
     private static final Logger LOG = LoggerFactory.getLogger(Namcah.class);
     private static final String META_CONTENT = "content";
     private static final String META_NAME_CSRF = "meta[name='_csrf']";
@@ -67,7 +69,8 @@ public class Namcah {
     private static final String ADMIN = "admin";
     private static final String ADMIN_PWD = StringUtils.reverse(ADMIN);
     private static final String HTTPS_127_0_0_1_9002 = "https://127.0.0.1:9002";
-    private static final Timeout CONNECTION_TIMEOUT_MS = Timeout.of(10, TimeUnit.SECONDS);
+    private static final int MAX_LOGIN_ATTEMPTS = 10;
+    private static final Timeout CONNECTION_TIMEOUT_MS = Timeout.of(MAX_LOGIN_ATTEMPTS, TimeUnit.SECONDS);
     private static final long CANCEL_HAC_MAN_AFTER_MS = 60L * 1000 * 100;
     private static final Map<HttpUriRequestBase, Long> REQUEST_MONITOR = new ConcurrentHashMap<>();
     private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
@@ -90,13 +93,16 @@ public class Namcah {
     @Parameter(names = {"--commerce", "-c"}, order = 2, description = "<SAP commerce URL>, default https://127.0.0.1:9002")
     private String server;
 
-    @Parameter(names = {"--commit", "-t"}, order = 3, description = "Enable HAC commit mode")
+    @Parameter(names = {"--commit", "-t"}, order = 3, description = "Control hAC commit mode")
     private boolean commit = false;
+
+    @Parameter(names = {"--route", "-r"}, order = 4, description = "The node route in case of a background processing node")
+    private String route;
 
     @Parameter(required = true, description = "<Groovy-Script Location>\n" + HELP_TXT)
     private String scriptLocation;
 
-    @Parameter(names = {"--debug", "-d"}, order = 98, description = "Enable debug level, see namcah.log")
+    @Parameter(names = {"--debug", "-d"}, order = 98, description = "Enable debug level, (logs are kept in namcah.log)")
     private Boolean debug = false;
 
     @Parameter(names = {"--help", "-h"}, order = 99, help = true, description = "This help")
@@ -145,7 +151,10 @@ public class Namcah {
             httpContext.setAttribute(HttpClientContext.COOKIE_STORE, new BasicCookieStore());
 
             // grep initial csrf token
-            Optional<String> initialToken = openLoginPageAndGrepToken(loginPageUrl, httpClient, httpContext);
+            final Optional<String> initialToken =
+                isConnectToRoute() ?
+                openLoginPageAndGrepToken(loginPageUrl, httpClient, httpContext, getRoute()) :
+                openLoginPageAndGrepToken(loginPageUrl, httpClient, httpContext);
 
             if (initialToken.isEmpty()) {
                 LOG.error("Couldn't obtain csrf token from {}", loginPageUrl);
@@ -177,10 +186,12 @@ public class Namcah {
                                  script);
 
         } catch (IOException | ParseException | NoSuchAlgorithmException | KeyStoreException | KeyManagementException e) {
-            String msg = MessageFormat.format(HAC_MAN_ERROR + " executing script: {}",
+            String msg = MessageFormat.format(HAC_MAN_ERROR + " executing script: {0}",
                                               getScriptLocation());
             LOG.error(msg, getScriptLocation(), e);
             return Optional.of(msg);
+        } finally {
+            forcedCleanupExpiredRequests();
         }
     }
 
@@ -189,9 +200,49 @@ public class Namcah {
                                                        final HttpClientContext httpContext)
         throws IOException, ParseException {
 
+        return openLoginPageAndGrepTokenInternal(loginPageUrl, httpClient, httpContext);
+
+    }
+
+    private Optional<String> openLoginPageAndGrepToken(final String loginPageUrl,
+                                                       final CloseableHttpClient httpClient,
+                                                       final HttpClientContext httpContext,
+                                                       final String route)
+        throws IOException, ParseException {
+
+        int attempt = 0;
+        BasicClientCookie dummyCookie = new BasicClientCookie("DUMMY", "VALUE");
+        Cookie cookie;
+        Optional<String> optCsrf;
+
+        do {
+
+            httpContext.getCookieStore().clear();
+
+            optCsrf = openLoginPageAndGrepTokenInternal(loginPageUrl, httpClient, httpContext);
+
+            final List<Cookie> cookies = httpContext.getCookieStore().getCookies();
+
+            cookie = cookies.stream()
+                            .filter(c -> "JSESSIONID".equals(c.getName())).collect(Collectors.toList())
+                            .stream().findAny().orElse(dummyCookie);
+
+            attempt++;
+
+        } while (!cookie.getValue().endsWith(route) && attempt < MAX_LOGIN_ATTEMPTS);
+
+        return optCsrf;
+    }
+
+    private Optional<String> openLoginPageAndGrepTokenInternal(final String loginPageUrl,
+                                                               final CloseableHttpClient httpClient,
+                                                               final HttpClientContext httpContext)
+        throws IOException, ParseException {
+
         HttpGet httpget = null;
 
         try {
+
             httpget = new HttpGet(loginPageUrl);
 
             RequestConfig requestConfig =
@@ -221,6 +272,8 @@ public class Namcah {
                       formatCookies(cookies)); // NOSONAR
             LOG.debug("CSRF: {}",
                       grepCsrfToken(metaTag).orElse("void")); // NOSONAR
+
+            LOG.info("DOMAIN {}", cookies.get(0).getDomain());
 
             return grepCsrfToken(metaTag);
 
@@ -374,9 +427,15 @@ public class Namcah {
 
             LOG.debug("Script execution result body: {}", body); // NOSONAR
 
-            final String result = StringUtils.substringBetween(body,
-                                                               "\"executionResult\":\"",
-                                                               "\",\"outputText\"");
+            final String result =
+                MessageFormat.format("Commerce: {0}\nRoute: {1}\nScript: {2}\n{3}",
+                                     getCommerceBaseUrl(),
+                                     isConnectToRoute() ? getRoute() : "main",
+                                     getScriptLocation(),
+                                     StringUtils.substringBetween(body,
+                                                                  "\"executionResult\":\"",
+                                                                  "\",\"outputText\"")
+                                                .replace("\\n", "\n"));
 
             return Optional.of(
                 StringUtils.defaultString(
@@ -429,6 +488,15 @@ public class Namcah {
 
     private static void cleanupExpiredRequests() {
         long now = System.currentTimeMillis();
+        cleanupExpiredRequestsInternal(now);
+    }
+
+    private static void forcedCleanupExpiredRequests() {
+        cleanupExpiredRequestsInternal(0L);
+    }
+
+
+    private static void cleanupExpiredRequestsInternal(final long now) {
         // find expired requests
         List<HttpUriRequestBase> expiredRequests =
             REQUEST_MONITOR.entrySet().stream()
@@ -440,26 +508,30 @@ public class Namcah {
         expiredRequests.forEach(r -> {
             if (!r.isCancelled()) {
                 r.cancel();
-                String msg = MessageFormat.format("Cancelled request {} after {} ms",
+                String msg = MessageFormat.format("Cancelled request {0} after {1} ms",
                                                   r.getRequestUri(),
                                                   CANCEL_HAC_MAN_AFTER_MS);
                 LOG.error(msg);
-                System.out.println("msg = " + msg); // NOSONAR
+                System.out.println(msg); // NOSONAR
             }
             REQUEST_MONITOR.remove(r);
         });
 
         if (!expiredRequests.isEmpty()) {
+            String msg = "Expired request found!";
+            System.out.println(msg); // NOSONAR
             System.exit(ERR);
         }
     }
 
-    public static void addToRequestMonitor(HttpUriRequestBase request) {
+    public static void addToRequestMonitor(final HttpUriRequestBase request) {
         REQUEST_MONITOR.put(request, System.currentTimeMillis() + CANCEL_HAC_MAN_AFTER_MS);
     }
 
-    public static void removeFromRequestMonitor(HttpUriRequestBase request) {
-        REQUEST_MONITOR.remove(request);
+    public static void removeFromRequestMonitor(final HttpUriRequestBase request) {
+        if (request != null) {
+            REQUEST_MONITOR.remove(request);
+        }
     }
 
     private Optional<String> grepCsrfToken(final Elements metaTag) {
@@ -494,6 +566,14 @@ public class Namcah {
 
     private String getScriptLocation() {
         return StringUtils.defaultString(scriptLocation, "");
+    }
+
+    private String getRoute() {
+        return StringUtils.defaultString(route, "");
+    }
+
+    private boolean isConnectToRoute() {
+        return StringUtils.isNotEmpty(getRoute());
     }
 
     private boolean isDebugEnabled() {

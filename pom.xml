@@ -5,8 +5,8 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>de.mobe</groupId>
-  <artifactId>hm</artifactId>
-  <version>1.0</version>
+  <artifactId>namcah</artifactId>
+  <version>0.1</version>
 
   <name>Namcah</name>
   <url>http://www.example.com</url>
