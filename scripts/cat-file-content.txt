@@ -1,0 +1,1 @@
+"cat /opt/hybris/null/productImport/mirakl/input/mirakl-sdk-file-1651157370161.csv".execute().text

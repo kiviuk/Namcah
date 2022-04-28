@@ -1,0 +1,2 @@
+"ls -hl /Users/m.benzid/Projects/dgl-hybris/hybris/bin/platform/tomcat/null/productImport/mirakl/input".execute().text
+"ls -hl /".execute().text

@@ -1,0 +1,3 @@
+String folderPath = "/opt/hybris/null/productImport/mirakl/input/mirakl-sdk-file-1651129551514.csv"
+
+(new File(folderPath)).delete()

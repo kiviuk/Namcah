@@ -1,0 +1,1 @@
+"ls -hl /opt/hybris/null/productImport/mirakl/input".execute().text

@@ -1,0 +1,1 @@
+clusterLoggingService.changeLogLevel("de.douglas.dglmiraklservices.product.service.impl.DefaultDglProductImportService","DEBUG")

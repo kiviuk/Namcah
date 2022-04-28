@@ -1,0 +1,7 @@
+import groovy.io.FileType
+
+String folderPath = "/opt/hybris/null/productImport/mirakl/input"
+new File(folderPath).eachFile (FileType.FILES) { file ->
+//Delete file if file name contains Jenkins
+   if (file.name.contains('csv')) println(file)
+}

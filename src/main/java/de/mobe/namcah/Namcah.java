@@ -36,8 +36,10 @@ import org.jsoup.select.Elements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
@@ -74,11 +76,9 @@ public class Namcah {
     private static final long CANCEL_HAC_MAN_AFTER_MS = 60L * 1000 * 100;
     private static final Map<HttpUriRequestBase, Long> REQUEST_MONITOR = new ConcurrentHashMap<>();
     private static final ScheduledExecutorService SCHEDULER = Executors.newScheduledThreadPool(1);
-    private static final String HELP_TXT =
-        "- Example: \n java -jar ./target/namcah.jar ./target/classes/groovyRocks.txt "
-            + "-c https://localhost:9002 -u admin -p nimda"
-            + ". Use 'echo $?' to grep the system exit code: 0 = OK, 1 = Error\n";
-    public static final String VOID_SCRIPT_RESULT = "void";
+
+
+    public static final String VOID_SCRIPT_RESULT = "Command created no output.";
 
     static {
         SCHEDULER.schedule(Namcah::cleanupExpiredRequests, CANCEL_HAC_MAN_AFTER_MS, TimeUnit.MILLISECONDS);
@@ -93,13 +93,13 @@ public class Namcah {
     @Parameter(names = {"--commerce", "-c"}, order = 2, description = "<SAP commerce URL>, default https://127.0.0.1:9002")
     private String server;
 
-    @Parameter(names = {"--commit", "-t"}, order = 3, description = "Control hAC commit mode")
+    @Parameter(names = {"--commit", "-t"}, order = 3, description = "Controls the HAC commit mode")
     private boolean commit = false;
 
     @Parameter(names = {"--route", "-r"}, order = 4, description = "The node route in case of a background processing node")
     private String route;
 
-    @Parameter(required = true, description = "<Groovy-Script Location>\n" + HELP_TXT)
+    @Parameter(names = {"--script", "-s"}, order = 5, description = "Location of the groovy script")
     private String scriptLocation;
 
     @Parameter(names = {"--debug", "-d"}, order = 98, description = "Enable debug level, (logs are kept in namcah.log)")
@@ -115,7 +115,12 @@ public class Namcah {
 
         initCmdLineArgs(arguments);
 
-        Optional<String> scriptContent = readScriptFile(getScriptLocation());
+        Optional<String> scriptContent;
+        if (StringUtils.isEmpty(getScriptLocation())) {
+            scriptContent = readFromPipe();
+        } else {
+            scriptContent = readScriptFile(getScriptLocation());
+        }
 
         if (scriptContent.isEmpty()) {
             String msg = MessageFormat.format(HAC_MAN_ERROR +
@@ -404,6 +409,8 @@ public class Namcah {
                                            final String script)
         throws IOException, ParseException {
 
+        System.err.println( "Executing script: "+ script); // NOSONAR
+
         HttpPost post = null;
 
         try {
@@ -491,6 +498,29 @@ public class Namcah {
         return scriptResultWrapped;
     }
 
+    private Optional<String> readFromPipe() {
+
+        List<String> scriptLines = new ArrayList<>();
+
+        try (InputStreamReader isReader = new InputStreamReader(System.in);
+             BufferedReader bufReader = new BufferedReader(isReader);) {
+
+            String inputStr = "";
+            while (inputStr != null) {
+                inputStr = bufReader.readLine();
+                if (inputStr != null) {
+                    scriptLines.add(inputStr);
+                } else {
+                    //  System.err.println("inputStr is null"); // NOSONAR
+                }
+            }
+        } catch (IOException e) {
+            System.err.println(e.getMessage()); // NOSONAR
+        }
+
+        return Optional.ofNullable(StringUtils.trimToNull(String.join(System.lineSeparator(), scriptLines)));
+    }
+
     private CloseableHttpClient createAcceptSelfSignedCertificateClient()
         throws NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
         return
@@ -522,7 +552,11 @@ public class Namcah {
 
         try {
             File file = new File(scriptLocation);
-            return Optional.of(FileUtils.readFileToString(file, StandardCharsets.UTF_8));
+
+            String content =
+                StringUtils.trimToNull(FileUtils.readFileToString(file, StandardCharsets.UTF_8));
+
+            return Optional.ofNullable(content);
         } catch (IOException e) {
             LOG.error("Error reading script from: {}", scriptLocation, e);
         }
@@ -667,6 +701,14 @@ public class Namcah {
      */
     private void initCmdLineArgs(final String... arguments) {
 
+        final String HELP_TXT_1 =
+            "Example 1: \n echo '\"ls -hl /\".execute().text' | java -jar ./target/namcah.jar -c https://localhost:9002 -u admin -p nimda";
+
+        final String HELP_TXT_2 =
+            "Example 2: \n java -jar ./target/namcah.jar -s /home/user/scripts/script.txt -c https://localhost:9002 -u admin -p nimda";
+
+        final String HELP_TXT_3 = "Use 'echo $?' to grep the system exit code: 0 = OK, 1 = Error";
+
         try {
             final JCommander jCommander =
                 JCommander.newBuilder()
@@ -679,6 +721,11 @@ public class Namcah {
 
             if (getHelp()) {
                 jCommander.usage();
+                System.out.println(HELP_TXT_1); // NOSONAR
+               // System.out.println("\n"); // NOSONAR
+                System.out.println(HELP_TXT_2); // NOSONAR
+                //System.out.println("\n"); // NOSONAR
+                System.out.println(HELP_TXT_3); // NOSONAR
                 System.exit(OK);
             }
 
