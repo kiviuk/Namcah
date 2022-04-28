@@ -14,10 +14,8 @@ public class Main {
         Optional<String> result = (new Namcah()).runHac(args);
 
         String hacManResult =
-            MessageFormat.format("<namcah>{0}{1}{2}</namcah>",
-                                 System.lineSeparator(),
-                                 result.orElse("Namcah Error. Check out the namcah log file."),
-                                 System.lineSeparator());
+            MessageFormat.format("{0}",
+                                 result.orElse("Namcah Error. Check out the namcah log file."));
 
         System.out.println(hacManResult);// NOSONAR
 

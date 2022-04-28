@@ -69,7 +69,7 @@ public class Namcah {
     private static final String ADMIN = "admin";
     private static final String ADMIN_PWD = StringUtils.reverse(ADMIN);
     private static final String HTTPS_127_0_0_1_9002 = "https://127.0.0.1:9002";
-    private static final int MAX_LOGIN_ATTEMPTS = 10;
+    private static final int MAX_LOGIN_ATTEMPTS = 100;
     private static final Timeout CONNECTION_TIMEOUT_MS = Timeout.of(MAX_LOGIN_ATTEMPTS, TimeUnit.SECONDS);
     private static final long CANCEL_HAC_MAN_AFTER_MS = 60L * 1000 * 100;
     private static final Map<HttpUriRequestBase, Long> REQUEST_MONITOR = new ConcurrentHashMap<>();
@@ -118,7 +118,8 @@ public class Namcah {
         Optional<String> scriptContent = readScriptFile(getScriptLocation());
 
         if (scriptContent.isEmpty()) {
-            String msg = MessageFormat.format(HAC_MAN_ERROR + " reading script file {0}. See log file.",
+            String msg = MessageFormat.format(HAC_MAN_ERROR +
+                                                  " reading script file {0}. See log file.",
                                               getScriptLocation());
             LOG.error(msg);
             return Optional.of(msg);
@@ -152,7 +153,7 @@ public class Namcah {
 
             // grep initial csrf token
             final Optional<String> initialToken =
-                isConnectToRoute() ?
+                shouldConnectToRoute() ?
                 openLoginPageAndGrepToken(loginPageUrl, httpClient, httpContext, getRoute()) :
                 openLoginPageAndGrepToken(loginPageUrl, httpClient, httpContext);
 
@@ -185,11 +186,18 @@ public class Namcah {
                                  httpClient,
                                  script);
 
-        } catch (IOException | ParseException | NoSuchAlgorithmException | KeyStoreException | KeyManagementException e) {
+        } catch (IOException
+                 | ParseException
+                 | NoSuchAlgorithmException
+                 | KeyStoreException
+                 | KeyManagementException e) {
+
             String msg = MessageFormat.format(HAC_MAN_ERROR + " executing script: {0}",
                                               getScriptLocation());
             LOG.error(msg, getScriptLocation(), e);
+
             return Optional.of(msg);
+
         } finally {
             forcedCleanupExpiredRequests();
         }
@@ -207,12 +215,12 @@ public class Namcah {
     private Optional<String> openLoginPageAndGrepToken(final String loginPageUrl,
                                                        final CloseableHttpClient httpClient,
                                                        final HttpClientContext httpContext,
-                                                       final String route)
+                                                       final String requestedRoute)
         throws IOException, ParseException {
 
         int attempt = 0;
-        BasicClientCookie dummyCookie = new BasicClientCookie("DUMMY", "VALUE");
-        Cookie cookie;
+        boolean foundRequestedRoute;
+        Cookie routeCookie;
         Optional<String> optCsrf;
 
         do {
@@ -223,13 +231,31 @@ public class Namcah {
 
             final List<Cookie> cookies = httpContext.getCookieStore().getCookies();
 
-            cookie = cookies.stream()
-                            .filter(c -> "JSESSIONID".equals(c.getName())).collect(Collectors.toList())
-                            .stream().findAny().orElse(dummyCookie);
+            routeCookie = getRouteCookie(cookies);
 
             attempt++;
 
-        } while (!cookie.getValue().endsWith(route) && attempt < MAX_LOGIN_ATTEMPTS);
+            LOG.debug("Attempt {}/{} to connect to requested route '{}'",
+                      attempt,
+                      MAX_LOGIN_ATTEMPTS,
+                      requestedRoute);
+
+            foundRequestedRoute = routeCookie.getValue().endsWith(requestedRoute);
+
+            if (!foundRequestedRoute && attempt == MAX_LOGIN_ATTEMPTS) {
+                LOG.info("Route '{}' not found. Using '{}'", getRoute(), routeCookie.getValue());
+            }
+
+        } while (!foundRequestedRoute && attempt < MAX_LOGIN_ATTEMPTS);
+
+        final String routeFoundMessage =
+            MessageFormat.format("Connected to requested route: {0} after {1} attempts.",
+                                 formatCookie(routeCookie),
+                                 attempt);
+
+        System.err.println(routeFoundMessage); // NOSONAR
+
+        LOG.info(routeFoundMessage);
 
         return optCsrf;
     }
@@ -273,7 +299,7 @@ public class Namcah {
             LOG.debug("CSRF: {}",
                       grepCsrfToken(metaTag).orElse("void")); // NOSONAR
 
-            LOG.info("DOMAIN {}", cookies.get(0).getDomain());
+            LOG.info("DOMAIN {}", getSessionCookie(cookies).getDomain());
 
             return grepCsrfToken(metaTag);
 
@@ -427,24 +453,42 @@ public class Namcah {
 
             LOG.debug("Script execution result body: {}", body); // NOSONAR
 
-            final String result =
-                MessageFormat.format("Commerce: {0}\nRoute: {1}\nScript: {2}\n{3}",
-                                     getCommerceBaseUrl(),
-                                     isConnectToRoute() ? getRoute() : "main",
-                                     getScriptLocation(),
-                                     StringUtils.substringBetween(body,
-                                                                  "\"executionResult\":\"",
-                                                                  "\",\"outputText\"")
-                                                .replace("\\n", "\n"));
-
-            return Optional.of(
-                StringUtils.defaultString(
-                    StringUtils.trimToNull(result), VOID_SCRIPT_RESULT)
-            );
+            return Optional.of(formatScriptResult(body, cookies));
 
         } finally {
             removeFromRequestMonitor(post);
         }
+    }
+
+    private String formatScriptResult(final String body, final List<Cookie> cookies) {
+        final String scriptResult =
+            StringUtils
+                .substringBetween(body, "\"executionResult\":\"", "\",\"outputText\"")
+                .replace("\\n", "\n")
+                .trim();
+
+        final String scriptResultOrDefault =
+            StringUtils.defaultString(
+                StringUtils.trimToNull(scriptResult), VOID_SCRIPT_RESULT
+            );
+
+        final String metaInfo =
+            MessageFormat.format("Commerce: {0}\nRoute: {1}\nScript: {2}",
+                                 getCommerceBaseUrl(),
+                                 shouldConnectToRoute() ? getRouteCookie(cookies).getValue() : "main",
+                                 getScriptLocation()
+                         )
+                         .trim();
+
+        String scriptResultWrapped =
+            MessageFormat.format("<namcah>{0}{1}{2}</namcah>",
+                                 System.lineSeparator(),
+                                 scriptResultOrDefault,
+                                 System.lineSeparator());
+
+        System.err.println(metaInfo); // NOSONAR
+
+        return scriptResultWrapped;
     }
 
     private CloseableHttpClient createAcceptSelfSignedCertificateClient()
@@ -540,6 +584,22 @@ public class Namcah {
                Optional.empty();
     }
 
+    private Cookie getRouteCookie(final List<Cookie> cookies) {
+        return getCookieImpl(cookies, "ROUTE");
+    }
+
+    private Cookie getSessionCookie(final List<Cookie> cookies) {
+        return getCookieImpl(cookies, "JSESSIONID");
+    }
+
+    private Cookie getCookieImpl(final List<Cookie> cookies, final String cookieId) {
+        BasicClientCookie dummyCookie = new BasicClientCookie("DUMMY", "VALUE");
+
+        return cookies.stream()
+                      .filter(c -> cookieId.equals(c.getName())).collect(Collectors.toList())
+                      .stream().findAny().orElse(dummyCookie);
+    }
+
     private String getCommerceBaseUrl() {
         return StringUtils.defaultString(server, HTTPS_127_0_0_1_9002);
     }
@@ -572,7 +632,7 @@ public class Namcah {
         return StringUtils.defaultString(route, "");
     }
 
-    private boolean isConnectToRoute() {
+    private boolean shouldConnectToRoute() {
         return StringUtils.isNotEmpty(getRoute());
     }
 
