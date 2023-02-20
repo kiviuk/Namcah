@@ -10,7 +10,7 @@ Using https://hc.apache.org/httpcomponents-client-5.1.x
 - auto-login
 - control HAC commit mode
 - terminates long-running http requests
-- auto-detects background nodes
+- auto-detect background nodes
 - supports *nix pipe lines
 
 ## Building from source
