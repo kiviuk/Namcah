@@ -11,7 +11,7 @@ Using https://hc.apache.org/httpcomponents-client-5.1.x
 - control HAC commit mode
 - terminates long-running http requests
 - auto-detect background nodes
-- supports *nix pipe lines
+- supports *nix pipe
 
 ## Building from source
 
