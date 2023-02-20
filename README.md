@@ -1,16 +1,16 @@
 # Namcah
 
-Namcah is a simple command line http client for the HAC Scripting Console of SAP Commerce.
+Namcah is a straightforward http client that operates on the command line and is designed to interact with the HAC Scripting Console in SAP Commerce. With Namcah, you can transmit a groovy script file to a remote HAC scripting console and execute it on the spot.
 
-Use Namcah from the command line to send a groovy script file to a remote HAC scripting console 
-and to execute it right there.
+By logging the root SSL key, the HTTPS communication between the IntelliJ Hybris integration plugin and the Hybris service was decrypted using WireShark.
 
-Based on https://hc.apache.org/httpcomponents-client-5.1.x
+Using https://hc.apache.org/httpcomponents-client-5.1.x
 ## Features
 
 - auto-login
 - control HAC commit mode
 - terminates long-running http requests
+- auto-detects background nodes
 - supports *nix pipe lines
 
 ## Building from source
